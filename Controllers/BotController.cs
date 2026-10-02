@@ -8,7 +8,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using TelegramFinanceBot.Services;
 
-namespace TelegramFinanceBot.Controllers;
+namespace SpendWise.Controllers;
 
 [ApiController]
 [AllowAnonymous]

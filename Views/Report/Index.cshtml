@@ -1,0 +1,84 @@
+@model ReportViewModel
+@{
+    ViewData["Title"] = "Spending Overview";
+}
+
+<div class="header-section">
+    <h1>@Model.ChatTitle</h1>
+    <p class="subtitle">Live expense analytics & recent activity</p>
+</div>
+
+<section class="summary">
+    <div class="stat">
+        <span class="label">THIS MONTH</span>
+        <span class="value">@Model.CurrentMonthTotal.ToString("N0") AMD</span>
+    </div>
+    <div class="stat">
+        <span class="label">LAST 7 DAYS</span>
+        <span class="value">@Model.Current7DaysTotal.ToString("N0") AMD</span>
+    </div>
+    <div class="stat">
+        <span class="label">PREVIOUS 7 DAYS</span>
+        <span class="value">@Model.Previous7DaysTotal.ToString("N0") AMD</span>
+    </div>
+</section>
+
+<h2>Category breakdown</h2>
+@if (Model.CategoryBreakdown.Count == 0)
+{
+    <p class="empty-state">No spendings recorded.</p>
+}
+else
+{
+    <div class="table-container">
+        <table class="clean-table">
+            <thead>
+                <tr>
+                    <th>CATEGORY</th>
+                    <th style="text-align: right;">TOTAL</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in Model.CategoryBreakdown)
+                {
+                    <tr>
+                        <td><span class="badge">@c.Category</span></td>
+                        <td class="amount-col">@c.TotalAmount.ToString("N0") AMD</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<h2>All spendings</h2>
+@if (Model.Spendings.Count == 0)
+{
+    <p class="empty-state">No spendings recorded.</p>
+}
+else
+{
+    <div class="table-container">
+        <table class="clean-table">
+            <thead>
+                <tr>
+                    <th>DATE</th>
+                    <th>CATEGORY</th>
+                    <th>NOTE</th>
+                    <th style="text-align: right;">AMOUNT</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Model.Spendings)
+                {
+                    <tr>
+                        <td class="date-col">@item.SpentAtUtc.AddHours(4).ToString("dd/MM/yyyy HH:mm")</td>
+                        <td><span class="badge">@item.Category</span></td>
+                        <td class="note-col">@(string.IsNullOrEmpty(item.Description) ? "—" : item.Description)</td>
+                        <td class="amount-col">@item.Amount.ToString("N0") AMD</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

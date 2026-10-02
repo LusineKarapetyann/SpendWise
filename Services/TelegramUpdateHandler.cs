@@ -10,7 +10,6 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Chat = SpendWise.Entities.Chat;
 
-
 namespace TelegramFinanceBot.Services;
 
 public class TelegramUpdateHandler
@@ -20,6 +19,8 @@ public class TelegramUpdateHandler
     private readonly TelegramOptions _telegramOptions;
     private readonly AppOptions _appOptions;
     private readonly ILogger<TelegramUpdateHandler> _logger;
+
+    private static readonly TimeSpan LocalOffset = TimeSpan.FromHours(4);
 
     public TelegramUpdateHandler(
         AppDbContext db,
@@ -47,7 +48,7 @@ public class TelegramUpdateHandler
 
         _logger.LogInformation("Chat {ChatId}: {Text}", telegramChatId, text);
 
-        var chat = await GetOrCreateChatAsync(_db, telegramChatId, ct);
+        var chat = await GetOrCreateChatAsync(_db, message.Chat, ct);
 
         if (text == "/start")
         {
@@ -99,9 +100,13 @@ public class TelegramUpdateHandler
         await bot.SendMessage(telegramChatId, parseError ?? SpendingParser.FormatHelp, cancellationToken: ct);
     }
 
-    private static async Task<Chat> GetOrCreateChatAsync(AppDbContext db, long telegramChatId, CancellationToken ct)
+    private static async Task<Chat> GetOrCreateChatAsync(AppDbContext db, Telegram.Bot.Types.Chat tgChat, CancellationToken ct)
     {
-        var chat = await db.Chats.FirstOrDefaultAsync(c => c.TelegramChatId == telegramChatId, ct);
+        var chat = await db.Chats.FirstOrDefaultAsync(c => c.TelegramChatId == tgChat.Id, ct);
+
+        string chatTitle = !string.IsNullOrWhiteSpace(tgChat.Title)
+            ? tgChat.Title
+            : (!string.IsNullOrWhiteSpace(tgChat.Username) ? $"@{tgChat.Username}" : $"{tgChat.FirstName} {tgChat.LastName}".Trim());
 
         if (chat is not null)
         {
@@ -110,7 +115,7 @@ public class TelegramUpdateHandler
 
         chat = new Chat
         {
-            TelegramChatId = telegramChatId,
+            TelegramChatId = tgChat.Id,
             ReportToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
             StartedAtUtc = DateTime.UtcNow
         };
@@ -123,11 +128,14 @@ public class TelegramUpdateHandler
 
     private async Task HandleTodayAsync(ITelegramBotClient bot, Chat chat, long telegramChatId, CancellationToken ct)
     {
-        var todayStart = DateTime.UtcNow.Date;
-        var tomorrowStart = todayStart.AddDays(1);
+        var localNow = DateTime.UtcNow.Add(LocalOffset);
+        var localTodayStart = localNow.Date;
+
+        var utcStart = localTodayStart.Subtract(LocalOffset);
+        var utcEnd = utcStart.AddDays(1);
 
         var todaySpendings = await _db.Spendings
-            .Where(s => s.ChatId == chat.Id && s.SpentAtUtc >= todayStart && s.SpentAtUtc < tomorrowStart)
+            .Where(s => s.ChatId == chat.Id && s.SpentAtUtc >= utcStart && s.SpentAtUtc < utcEnd)
             .OrderBy(s => s.SpentAtUtc)
             .ToListAsync(ct);
 
@@ -140,7 +148,7 @@ public class TelegramUpdateHandler
         var total = todaySpendings.Sum(s => s.Amount);
 
         var lines = todaySpendings.Select(s =>
-            $"{s.SpentAtUtc:HH:mm} · {Fmt(s.Amount)} {_telegramOptions.Currency} · {s.Category}" +
+            $"{s.SpentAtUtc.Add(LocalOffset):HH:mm} · {Fmt(s.Amount)} {_telegramOptions.Currency} · {s.Category}" +
             (string.IsNullOrEmpty(s.Note) ? "" : $" ({s.Note})"));
 
         var text = $"Today: {Fmt(total)} {_telegramOptions.Currency} ({todaySpendings.Count} entries)\n\n" +
@@ -165,5 +173,5 @@ public class TelegramUpdateHandler
         await bot.SendMessage(telegramChatId, text, cancellationToken: ct);
     }
 
-    private static string Fmt(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+    private static string Fmt(decimal value) => value.ToString("N0", CultureInfo.InvariantCulture);
 }

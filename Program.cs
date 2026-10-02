@@ -48,7 +48,7 @@ builder.Services.AddScoped<TelegramUpdateHandler>();
 
 builder.Services.AddHostedService<DailyDigestWorker>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllersWithViews();
 
 var app = builder.Build();
 
