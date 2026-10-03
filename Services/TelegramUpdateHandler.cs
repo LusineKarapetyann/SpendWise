@@ -4,6 +4,7 @@ using SpendWise.Data;
 using SpendWise.Entities;
 using SpendWise.Options;
 using SpendWise.Services;
+using SpendWise.Services.Commands;
 using System.Globalization;
 using System.Security.Cryptography;
 using Telegram.Bot;
@@ -15,24 +16,19 @@ namespace TelegramFinanceBot.Services;
 public class TelegramUpdateHandler
 {
     private readonly AppDbContext _db;
-    private readonly StatsService _stats;
     private readonly TelegramOptions _telegramOptions;
-    private readonly AppOptions _appOptions;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<TelegramUpdateHandler> _logger;
-
-    private static readonly TimeSpan LocalOffset = TimeSpan.FromHours(4);
 
     public TelegramUpdateHandler(
         AppDbContext db,
-        StatsService stats,
         IOptions<TelegramOptions> telegramOptions,
-        IOptions<AppOptions> appOptions,
+        IServiceProvider serviceProvider,
         ILogger<TelegramUpdateHandler> logger)
     {
         _db = db;
-        _stats = stats;
         _telegramOptions = telegramOptions.Value;
-        _appOptions = appOptions.Value;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -50,29 +46,15 @@ public class TelegramUpdateHandler
 
         var chat = await GetOrCreateChatAsync(_db, message.Chat, ct);
 
-        if (text == "/start")
-        {
-            await bot.SendMessage(
-                telegramChatId,
-                "Hi! I'm your finance consultant.\n\n" +
-                "Send one spending per message, one line:\n" +
-                $"{SpendingParser.FormatHelp}\n\n" +
-                "Commands:\n" +
-                "/today — sum and list for today\n" +
-                "/month — short month recap",
-                cancellationToken: ct);
-            return;
-        }
+        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var command = parts.Length > 0 ? parts[0].ToLowerInvariant() : string.Empty;
 
-        if (text == "/today")
-        {
-            await HandleTodayAsync(bot, chat, telegramChatId, ct);
-            return;
-        }
+        var commandHandler = _serviceProvider.GetKeyedService<ITelegramCommandHandler>(command);
 
-        if (text == "/month")
+        if (commandHandler is not null)
         {
-            await HandleMonthAsync(bot, chat, telegramChatId, ct);
+            var args = parts.Skip(1).ToArray();
+            await commandHandler.HandleAsync(bot, chat, message, args, ct);
             return;
         }
 
@@ -104,10 +86,6 @@ public class TelegramUpdateHandler
     {
         var chat = await db.Chats.FirstOrDefaultAsync(c => c.TelegramChatId == tgChat.Id, ct);
 
-        string chatTitle = !string.IsNullOrWhiteSpace(tgChat.Title)
-            ? tgChat.Title
-            : (!string.IsNullOrWhiteSpace(tgChat.Username) ? $"@{tgChat.Username}" : $"{tgChat.FirstName} {tgChat.LastName}".Trim());
-
         if (chat is not null)
         {
             return chat;
@@ -124,53 +102,6 @@ public class TelegramUpdateHandler
         await db.SaveChangesAsync(ct);
 
         return chat;
-    }
-
-    private async Task HandleTodayAsync(ITelegramBotClient bot, Chat chat, long telegramChatId, CancellationToken ct)
-    {
-        var localNow = DateTime.UtcNow.Add(LocalOffset);
-        var localTodayStart = localNow.Date;
-
-        var utcStart = localTodayStart.Subtract(LocalOffset);
-        var utcEnd = utcStart.AddDays(1);
-
-        var todaySpendings = await _db.Spendings
-            .Where(s => s.ChatId == chat.Id && s.SpentAtUtc >= utcStart && s.SpentAtUtc < utcEnd)
-            .OrderBy(s => s.SpentAtUtc)
-            .ToListAsync(ct);
-
-        if (todaySpendings.Count == 0)
-        {
-            await bot.SendMessage(telegramChatId, "Nothing logged today yet.", cancellationToken: ct);
-            return;
-        }
-
-        var total = todaySpendings.Sum(s => s.Amount);
-
-        var lines = todaySpendings.Select(s =>
-            $"{s.SpentAtUtc.Add(LocalOffset):HH:mm} · {Fmt(s.Amount)} {_telegramOptions.Currency} · {s.Category}" +
-            (string.IsNullOrEmpty(s.Note) ? "" : $" ({s.Note})"));
-
-        var text = $"Today: {Fmt(total)} {_telegramOptions.Currency} ({todaySpendings.Count} entries)\n\n" +
-                    string.Join('\n', lines);
-
-        await bot.SendMessage(telegramChatId, text, cancellationToken: ct);
-    }
-
-    private async Task HandleMonthAsync(ITelegramBotClient bot, Chat chat, long telegramChatId, CancellationToken ct)
-    {
-        var monthStats = await _stats.GetMonthStatsAsync(_db, chat.Id, DateTime.UtcNow, ct);
-
-        if (monthStats is null)
-        {
-            await bot.SendMessage(telegramChatId, "Nothing logged this month yet.", cancellationToken: ct);
-            return;
-        }
-
-        var reportUrl = $"{_appOptions.PublicBaseUrl.TrimEnd('/')}/report/{chat.ReportToken}";
-        var text = DigestMessageBuilder.Build(monthStats, _telegramOptions.Currency, reportUrl);
-
-        await bot.SendMessage(telegramChatId, text, cancellationToken: ct);
     }
 
     private static string Fmt(decimal value) => value.ToString("N0", CultureInfo.InvariantCulture);

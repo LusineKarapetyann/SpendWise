@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using SpendWise.Data;
 using SpendWise.Options;
 using SpendWise.Services;
+using SpendWise.Services.Commands;
 using Telegram.Bot;
 using Telegram.Bot.Types.Enums;
 using TelegramFinanceBot.Services;
@@ -11,7 +12,6 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<TelegramOptions>(
     builder.Configuration.GetSection(TelegramOptions.SectionName));
-
 builder.Services.Configure<AppOptions>(builder.Configuration);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -43,11 +43,12 @@ builder.Services.AddSingleton<ITelegramBotClient>(sp =>
 
 builder.Services.AddSingleton<StatsService>();
 
+builder.Services.AddKeyedScoped<ITelegramCommandHandler, StartCommandHandler>("/start");
+builder.Services.AddKeyedScoped<ITelegramCommandHandler, TodayCommandHandler>("/today");
+builder.Services.AddKeyedScoped<ITelegramCommandHandler, MonthCommandHandler>("/month");
 
 builder.Services.AddScoped<TelegramUpdateHandler>();
-
 builder.Services.AddHostedService<DailyDigestWorker>();
-
 builder.Services.AddControllersWithViews();
 
 var app = builder.Build();
@@ -87,5 +88,4 @@ using (var webhookScope = app.Services.CreateScope())
 }
 
 app.MapControllers();
-
 app.Run();
